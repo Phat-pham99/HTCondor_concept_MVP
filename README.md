@@ -1,5 +1,7 @@
 # HTCondor_demo
 
+![HTCondor mascot](https://htcondor.org/assets/images/HTCondor_red_blk_classic.png)
+
 This repository provides a local Docker Compose demonstration of an HTCondor pool. A manager container runs the collector, negotiator, schedd, and startd. A Python autoscaler observes the schedd over SSH, creates labeled worker containers through the Docker API, and removes idle workers.
 
 ## Why use HTCondor
