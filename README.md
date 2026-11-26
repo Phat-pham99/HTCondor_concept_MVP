@@ -4,6 +4,35 @@
 
 This repository provides a local Docker Compose demonstration of an HTCondor pool. A manager container runs the collector, negotiator, schedd, and startd. A Python autoscaler observes the schedd over SSH, creates labeled worker containers through the Docker API, and removes idle workers.
 
+## Why This Project Was Born
+
+Our day-to-day work revolves around scientific computation: simulations, parameter sweeps, and numerical models, along with the ongoing effort to make them cheaper and faster. Our requirements are specific enough that off-the-shelf solutions rarely fit as-is, so we need an approach we can shape around our own workloads.
+
+Several recurring problems motivated this proof of concept:
+
+- **Bursty demand.** Compute needs arrive in waves. A fixed cluster sized for peak load sits idle most of the time, while one sized for average load builds long queues during peaks.
+- **Many independent jobs.** Most workloads are embarrassingly parallel: hundreds or thousands of runs that differ only in their inputs. Overall throughput matters more than the speed of any single run.
+- **Cost pressure.** Paying for idle machines is wasteful. Capacity should follow the queue, growing when work arrives and shrinking when it is done.
+- **Heterogeneous resources.** Jobs have different CPU and memory needs, and available machines vary. The scheduler must match each job to a suitable slot rather than assume uniform hardware.
+- **Reliability.** Long-running calculations should survive the loss of a worker and be retried or held, not silently lost.
+- **Visibility.** Users and operators need to see what is queued, running, failed, or stuck without logging into individual machines.
+
+This repository is a small, self-contained MVP that tests whether HTCondor, paired with a lightweight autoscaler and a monitoring dashboard, addresses these needs. It runs entirely on a single machine with Docker Compose, so the concept can be evaluated, demonstrated, and iterated on before any investment in real infrastructure.
+
+### Goals of the MVP
+
+- Show the full job lifecycle: submit, match, transfer inputs, execute, and return outputs.
+- Demonstrate queue-driven scaling of workers up and down.
+- Exercise realistic scenarios: successful, long-running, failing, unmatchable, and CPU-heavy jobs.
+- Provide a dashboard that makes pool and job state observable at a glance.
+
+### Out of scope
+
+- Production hardening, multi-host networking, authentication beyond the local demo, and cloud provider integration. See [Security and scope](#security-and-scope).
+
+---
+
+
 ## Why use HTCondor
 
 HTCondor is a high-throughput computing (HTC) workload manager. Where an HPC scheduler optimizes a single tightly coupled job to finish as fast as possible, HTCondor targets many loosely coupled jobs that run over hours, days, or months and tries to keep every available machine busy. Progress is measured in jobs completed per month rather than floating-point operations per second. That model suits embarrassingly parallel work such as the Monte Carlo runs in this demo.
@@ -19,7 +48,6 @@ This pool relies on HTCondor for several reasons:
 
 The result is that compute becomes a fungible pool: queue demand drives container creation, HTCondor routes work to whatever slots appear, and idle capacity is reclaimed automatically.
 
-
 ## Prerequisites
 
 - Linux Docker Engine with Docker Compose v2
@@ -32,9 +60,11 @@ The demo uses the official `htcondor/mini:lts` and `htcondor/execute:lts` images
 ## Workflow
 
 ### Animated GIF workflow
+
 ![Animated HTCondor workflow](assets/htcondor-workflow.gif)
 
 ### Standard Mermaid chart workflow
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -47,7 +77,7 @@ sequenceDiagram
     User->>Submit: 1. condor_submit job.sub
     Worker-->>Collector: 2. Advertise Machine ClassAd
     Submit-->>Collector: 3. Advertise Job ClassAd
-    
+  
     loop Matchmaking Cycle
         Negotiator->>Collector: 4. Query available jobs & worker slots
         Collector-->>Negotiator: 5. Return matched pairs
@@ -55,13 +85,13 @@ sequenceDiagram
 
     Negotiator->>Submit: 6. Notify job match & allocated slot
     Submit->>Worker: 7. Claim slot & Transfer Input Files
-    
+  
     activate Worker
     Worker->>Worker: 8. Execute Task (condor_starter)
     Worker-->>Submit: 9. Stream stdout / stderr & update job log
     Worker->>Submit: 10. Return Output Files & Exit Code
     deactivate Worker
-    
+  
     Submit-->>User: 11. Job Complete (Output & Log ready)
 ```
 
@@ -132,17 +162,17 @@ rm -rf .demo
 
 ## Configuration
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AUTOSCALER_MAX_WORKERS` | `4` | Maximum number of worker containers |
-| `AUTOSCALER_MIN_WORKERS` | `1` | Minimum workers used when demand exists |
-| `AUTOSCALER_JOBS_PER_WORKER` | `1` | Demand-to-worker scaling ratio |
-| `AUTOSCALER_POLL_SECONDS` | `5` | Queue polling interval |
-| `AUTOSCALER_IDLE_SECONDS` | `60` | Idle grace period before teardown |
-| `AUTOSCALER_WORKER_CPUS` | `1` | CPU limit for each worker |
-| `AUTOSCALER_WORKER_MEMORY_MB` | `512` | Memory limit for each worker |
-| `DOCKER_UID` | `1000` | User ID used by the autoscaler container |
-| `DOCKER_GID` | `1000` | Docker socket group ID used by the autoscaler |
+| Variable                        | Default  | Purpose                                       |
+| ------------------------------- | -------- | --------------------------------------------- |
+| `AUTOSCALER_MAX_WORKERS`      | `4`    | Maximum number of worker containers           |
+| `AUTOSCALER_MIN_WORKERS`      | `1`    | Minimum workers used when demand exists       |
+| `AUTOSCALER_JOBS_PER_WORKER`  | `1`    | Demand-to-worker scaling ratio                |
+| `AUTOSCALER_POLL_SECONDS`     | `5`    | Queue polling interval                        |
+| `AUTOSCALER_IDLE_SECONDS`     | `60`   | Idle grace period before teardown             |
+| `AUTOSCALER_WORKER_CPUS`      | `1`    | CPU limit for each worker                     |
+| `AUTOSCALER_WORKER_MEMORY_MB` | `512`  | Memory limit for each worker                  |
+| `DOCKER_UID`                  | `1000` | User ID used by the autoscaler container      |
+| `DOCKER_GID`                  | `1000` | Docker socket group ID used by the autoscaler |
 
 The autoscaler counts queued and running jobs. With one job per worker, it requests one to four workers when demand exists. Each worker is labeled `htcondor.autoscaler=true` and `htcondor.role=worker`, so the controller only manages workers it created.
 
